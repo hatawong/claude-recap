@@ -1,5 +1,5 @@
 /**
- * E2E Test Framework for claude-recap
+ * E2E Test Framework for agent-os-memory
  *
  * Tests the full plugin lifecycle: Claude CLI loads plugin → hooks trigger
  * → LLM writes session files → session files are injected on next start.
@@ -523,6 +523,257 @@ test('Case 5: Topic content language matches user conversation language', async 
       const hasChinese = sectionMatch && /[\u4e00-\u9fff]/.test(sectionMatch[1]);
       assert(hasChinese,
         'Section content is written in Chinese (matching user language)');
+    }
+  } finally {
+    ws.cleanup();
+  }
+});
+
+// ---- Case 6: /remember end-to-end (write → inject on next session) ----
+
+test('Case 6: /remember persists and injects on next session', async () => {
+  const ws = createWorkspace();
+  try {
+    // Session 1: Use /remember to save a preference
+    console.log('  [session 1] Saving preference via /remember...');
+    const result1 = await runClaude({
+      prompt: 'Please remember this preference for me: always use bun instead of npm. Use /remember to save it globally.',
+      cwd: ws.projectDir,
+      memoryHome: ws.memoryHome,
+    });
+
+    assert(result1.exitCode === 0, 'Session 1: CLI exited with code 0');
+
+    // Check REMEMBER.md was created
+    const globalRemember = path.join(ws.memoryHome, 'REMEMBER.md');
+    assertFileExists(globalRemember, 'Global REMEMBER.md created');
+
+    if (fs.existsSync(globalRemember)) {
+      const content = fs.readFileSync(globalRemember, 'utf-8');
+      assert(content.toLowerCase().includes('bun'),
+        'REMEMBER.md contains "bun" preference');
+    }
+
+    // Session 2: Check that preference is injected
+    console.log('  [session 2] Checking preference injection...');
+    const result2 = await runClaude({
+      prompt: 'What preferences or things have I asked you to remember? Check the SessionStart context. Keep it brief.',
+      cwd: ws.projectDir,
+      memoryHome: ws.memoryHome,
+    });
+
+    assert(result2.exitCode === 0, 'Session 2: CLI exited with code 0');
+
+    // Session 2 should mention bun (injected from REMEMBER.md)
+    const mentionsBun = result2.stdout.toLowerCase().includes('bun');
+    assert(mentionsBun, 'Session 2: mentions "bun" from injected REMEMBER.md');
+
+  } finally {
+    ws.cleanup();
+  }
+});
+
+// ---- Case 7: archive-pending delayed archival ----
+
+test('Case 7: archive-pending archives unarchived topics', async () => {
+  const ws = createWorkspace();
+  try {
+    // Session 1: Create a topic but don't trigger a topic switch
+    // (the last topic in a session is often unarchived — archive-pending catches it)
+    console.log('  [session 1] Creating task with single topic...');
+    const result1 = await runClaude({
+      prompt: 'Create a file called utils.js with a function capitalize(str) that capitalizes the first letter. Write the file.',
+      cwd: ws.projectDir,
+      memoryHome: ws.memoryHome,
+    });
+
+    assert(result1.exitCode === 0, 'Session 1: CLI exited with code 0');
+
+    // Check .current_topic was set
+    const topic1 = getCurrentTopic(ws.memoryHome, ws.projectDir);
+    if (topic1) {
+      console.log(`  [info] Session 1: .current_topic = ${topic1}`);
+    }
+
+    // Count topic files before session 2
+    const topicsBefore = findTopicFiles(ws.memoryHome, ws.projectDir);
+    console.log(`  [info] Topic files before session 2: ${topicsBefore.length}`);
+
+    // Session 2: New session triggers SessionStart → archive-pending runs in background
+    // Give it a simple task and wait
+    console.log('  [session 2] Triggering archive-pending via SessionStart...');
+    const result2 = await runClaude({
+      prompt: 'Say hello briefly.',
+      cwd: ws.projectDir,
+      memoryHome: ws.memoryHome,
+      timeout: 180_000, // extra time for archive-pending background process
+    });
+
+    assert(result2.exitCode === 0, 'Session 2: CLI exited with code 0');
+
+    // Wait a moment for archive-pending background process
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // Check if archive-pending created topic files
+    const topicsAfter = findTopicFiles(ws.memoryHome, ws.projectDir);
+    console.log(`  [info] Topic files after session 2: ${topicsAfter.length}`);
+
+    // archive-pending should have archived the unarchived topic from session 1
+    assert(topicsAfter.length > topicsBefore.length,
+      `More topic files after session 2 (before: ${topicsBefore.length}, after: ${topicsAfter.length})`);
+
+  } finally {
+    ws.cleanup();
+  }
+});
+
+// ---- Case 8: Compact cold-read recovery ----
+
+test('Case 8: Compact cold-read recovery produces accurate summary', async () => {
+  const ws = createWorkspace();
+  try {
+    // Session 1: Work on a coding task (establishes a topic with real JSONL)
+    console.log('  [session 1] Coding task to establish topic + JSONL...');
+    fs.writeFileSync(path.join(ws.projectDir, 'calc.js'), `
+function add(a, b) { return a + b; }
+function subtract(a, b) { return a - b; }
+module.exports = { add, subtract };
+`);
+
+    const result1 = await runClaude({
+      prompt: 'Add a multiply(a, b) function to calc.js. Write the file.',
+      cwd: ws.projectDir,
+      memoryHome: ws.memoryHome,
+    });
+
+    assert(result1.exitCode === 0, 'Session 1: CLI exited with code 0');
+
+    // Find the session directory and manually place .compacted marker
+    const sessions = findSessionDirs(ws.memoryHome, ws.projectDir);
+    assert(sessions.length >= 1, 'Session dir exists');
+
+    if (sessions.length > 0) {
+      const sessionDir = sessions[0].dirPath;
+      const compactedFile = path.join(sessionDir, '.compacted');
+      fs.writeFileSync(compactedFile, '');
+      console.log(`  [info] Placed .compacted marker in ${sessions[0].sessionId}`);
+
+      // Session 2: Different topic → triggers set-topic.sh → should cold-read
+      console.log('  [session 2] Topic switch with .compacted marker...');
+      const result2 = await runClaude({
+        prompt: 'New topic: create a file called hello.txt with the text "hello world". This is completely unrelated to calc.js.',
+        cwd: ws.projectDir,
+        memoryHome: ws.memoryHome,
+        continueSession: true,
+        timeout: 180_000, // cold-read needs extra time
+      });
+
+      assert(result2.exitCode === 0, 'Session 2: CLI exited with code 0');
+
+      // Check that a topic file was created (cold-read or fallback)
+      const topics = findTopicFiles(ws.memoryHome, ws.projectDir);
+      assert(topics.length >= 1, `At least 1 topic file created (got ${topics.length})`);
+
+      if (topics.length > 0) {
+        const content = topics[0].content;
+        // Cold-read summary should mention the actual work (calc/multiply)
+        const mentionsWork = content.toLowerCase().includes('calc') ||
+          content.toLowerCase().includes('multiply') ||
+          content.toLowerCase().includes('function');
+        assert(mentionsWork,
+          'Topic summary mentions actual work (calc/multiply/function)');
+      }
+
+      // .compacted should be removed after cold-read (set-topic.sh cleans it)
+      const compactedExists = fs.existsSync(compactedFile);
+      assert(!compactedExists, '.compacted marker removed after cold-read');
+    }
+  } finally {
+    ws.cleanup();
+  }
+});
+
+// ---- Case 9: /save-topic manual checkpoint ----
+
+test('Case 9: /save-topic creates topic file without topic switch', async () => {
+  const ws = createWorkspace();
+  try {
+    // Single session: work on something, then /save-topic
+    console.log('  [session] Task + manual save...');
+    fs.writeFileSync(path.join(ws.projectDir, 'app.js'), 'console.log("app");\n');
+
+    const result = await runClaude({
+      prompt: 'Read app.js and add a comment explaining what it does. Then use /save-topic to checkpoint progress.',
+      cwd: ws.projectDir,
+      memoryHome: ws.memoryHome,
+    });
+
+    assert(result.exitCode === 0, 'CLI exited with code 0');
+
+    // /save-topic should have created a topic file without needing a topic switch
+    const topics = findTopicFiles(ws.memoryHome, ws.projectDir);
+    assert(topics.length >= 1,
+      `/save-topic created topic file (got ${topics.length})`);
+
+    if (topics.length > 0) {
+      assert(topics[0].content.includes('# Topic:'),
+        'Topic file has "# Topic:" header');
+    }
+  } finally {
+    ws.cleanup();
+  }
+});
+
+// ---- Case 10: Multi-topic single session ----
+
+test('Case 10: Multiple topic switches in single session', async () => {
+  const ws = createWorkspace();
+  try {
+    // Turn 1: First topic
+    console.log('  [turn 1] First topic...');
+    fs.writeFileSync(path.join(ws.projectDir, 'a.js'), 'const a = 1;\n');
+    const result1 = await runClaude({
+      prompt: 'Read a.js and add a JSDoc comment to it. Keep it brief.',
+      cwd: ws.projectDir,
+      memoryHome: ws.memoryHome,
+    });
+    assert(result1.exitCode === 0, 'Turn 1: CLI exited with code 0');
+
+    // Turn 2: Second topic (triggers archival of first)
+    console.log('  [turn 2] Second topic...');
+    const result2 = await runClaude({
+      prompt: 'Completely new topic: create a file called poem.txt with a short haiku about coding. Unrelated to a.js.',
+      cwd: ws.projectDir,
+      memoryHome: ws.memoryHome,
+      continueSession: true,
+    });
+    assert(result2.exitCode === 0, 'Turn 2: CLI exited with code 0');
+
+    // Turn 3: Third topic (triggers archival of second)
+    console.log('  [turn 3] Third topic...');
+    const result3 = await runClaude({
+      prompt: 'Another new topic: create a file called config.json with { "debug": true }. Unrelated to previous tasks.',
+      cwd: ws.projectDir,
+      memoryHome: ws.memoryHome,
+      continueSession: true,
+    });
+    assert(result3.exitCode === 0, 'Turn 3: CLI exited with code 0');
+
+    // Should have at least 2 archived topic files (first and second)
+    const topics = findTopicFiles(ws.memoryHome, ws.projectDir);
+    console.log(`  [info] Topic files: ${topics.length}`);
+    for (const t of topics) {
+      console.log(`    ${t.name}`);
+    }
+
+    assert(topics.length >= 2,
+      `At least 2 topic files from 3 topics (got ${topics.length})`);
+
+    // Check sequential numbering
+    if (topics.length >= 2) {
+      const sorted = topics.map(t => t.name).sort();
+      assert(sorted[0].startsWith('01-'), `First file starts with 01- (got ${sorted[0]})`);
+      assert(sorted[1].startsWith('02-'), `Second file starts with 02- (got ${sorted[1]})`);
     }
   } finally {
     ws.cleanup();
