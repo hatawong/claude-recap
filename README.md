@@ -1,24 +1,37 @@
-# claude-recap
-
-**Topic-based automatic memory for Claude Code — never lose context across sessions or compactions.**
-
-<!-- TODO: badges (license, version, shell) -->
+<p align="center">
+  <strong>Claude-Recap</strong><br>
+  <em>Topic-based automatic memory for Claude Code</em>
+</p>
 
 <p align="center">
-  <img src="demo.gif" alt="claude-recap demo: automatic topic archival and cross-session memory" width="800" />
+  <a href="https://github.com/hatawong/claude-recap/blob/main/LICENSE"><img src="https://img.shields.io/github/license/hatawong/claude-recap" alt="License" /></a>
+  <a href="https://github.com/hatawong/claude-recap/stargazers"><img src="https://img.shields.io/github/stars/hatawong/claude-recap" alt="Stars" /></a>
+  <a href="https://github.com/hatawong/claude-recap/issues"><img src="https://img.shields.io/github/issues/hatawong/claude-recap" alt="Issues" /></a>
+  <a href="https://github.com/hatawong/claude-recap/commits/main"><img src="https://img.shields.io/github/last-commit/hatawong/claude-recap" alt="Last Commit" /></a>
+  <img src="https://img.shields.io/badge/shell-bash-green" alt="Shell" />
 </p>
+
+<p align="center">
+  Never lose context across sessions or compactions.
+</p>
+
+<p align="center">
+  <img src="demo.gif" alt="Claude-Recap demo: automatic topic archival and cross-session memory" width="800" />
+</p>
+
+---
 
 ## The Problem
 
 Claude Code forgets everything between sessions. Switch topics mid-conversation and the previous context is gone. Hit a context compaction and your working state evaporates. Start a new session and you're explaining the same project from scratch.
 
-## What claude-recap Does
+## What Claude-Recap Does
 
 Two shell hooks that run automatically — zero manual effort:
 
 - **Automatic topic archival** — Every response gets a topic tag. When the topic changes, the previous one is summarized and saved to a Markdown file.
 - **Context injection** — Each new session starts with your topic history and remembered preferences injected automatically.
-- **Compaction recovery** — When Claude Code compacts your context, claude-recap cold-reads from the JSONL transcript to rebuild accurate summaries. Nothing is lost.
+- **Compaction recovery** — When Claude Code compacts your context, Claude-Recap cold-reads from the JSONL transcript to rebuild accurate summaries. Nothing is lost.
 - **`/remember` skill** — Tell Claude to remember preferences across sessions: "always use bun", "never auto-commit". Stored in plain Markdown.
 
 Everything is stored locally as Markdown files in `~/.memory/`. No database, no cloud, no dependencies beyond bash and Node.js.
@@ -105,7 +118,7 @@ All data lives in `~/.memory/` (configurable via `MEMORY_HOME` env var):
 
 ## Comparison
 
-| | claude-recap | claude-mem | Manual CLAUDE.md |
+| | Claude-Recap | claude-mem | Manual CLAUDE.md |
 |---|---|---|---|
 | Granularity | Per-topic | Per-session dump | Manual |
 | Automation | Fully automatic | Automatic | Manual |
