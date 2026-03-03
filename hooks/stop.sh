@@ -21,12 +21,26 @@ LAST_MSG=$(echo "$INPUT" | jq -r '.last_assistant_message // ""')
 # shellcheck disable=SC2016
 NEW_TOPIC=$(echo "$LAST_MSG" | head -1 | sed -n 's/^› `\([a-z0-9-]*\)`$/\1/p')
 
+# Fallback: when LLM uses tools, the tag is in an earlier message (not last_assistant_message).
+# Read the JSONL transcript to find the most recent topic tag from any assistant text block.
+if [ -z "$NEW_TOPIC" ]; then
+  TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // ""')
+  if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+    NEW_TOPIC=$(tail -50 "$TRANSCRIPT_PATH" | \
+      jq -r '.message.content[]? | select(.type == "text") | .text' 2>/dev/null | \
+      sed -n 's/^› `\([a-z0-9-]*\)`$/\1/p' | tail -1) || true
+    if [ -n "$NEW_TOPIC" ]; then
+      echo "[stop.sh] extracted topic tag from transcript (fallback): '${NEW_TOPIC}'" >&2
+    fi
+  fi
+fi
+
 # Debug: log what we got
 echo "[stop.sh] extracted topic tag: '${NEW_TOPIC}'" >&2
 
 # If no tag found, pass through (LLM didn't follow the rule)
 if [ -z "$NEW_TOPIC" ]; then
-  echo "[stop.sh] no topic tag found in last_assistant_message, pass through" >&2
+  echo "[stop.sh] no topic tag found in last_assistant_message or transcript, pass through" >&2
   exit 0
 fi
 
@@ -57,6 +71,8 @@ fi
 
 # Topic changed — archive old topic via direct bash command
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+# Resolve transcript_path (may already be set from fallback above, or extract now)
+TRANSCRIPT_PATH="${TRANSCRIPT_PATH:-$(echo "$INPUT" | jq -r '.transcript_path // ""')}"
 
 SUMMARY_TEMPLATE=$(cat "${PLUGIN_ROOT}/scripts/topic-tmpl.md")
 cat >&2 <<TOPIC_EOF
@@ -64,7 +80,7 @@ Topic changed from '${OLD_TOPIC}' to '${NEW_TOPIC}'.
 
 Archive the old topic NOW. Write a factual summary of '${OLD_TOPIC}' and run this command:
 
-bash "${PLUGIN_ROOT}/scripts/set-topic.sh" "${OLD_TOPIC}" "${NEW_TOPIC}" "${SESSION_ID}" "<your_summary>"
+bash "${PLUGIN_ROOT}/scripts/set-topic.sh" "${OLD_TOPIC}" "${NEW_TOPIC}" "${SESSION_ID}" "<your_summary>" "${TRANSCRIPT_PATH}"
 
 Replace <your_summary> with a structured summary using this format (section headings in English, content in user's language, skip empty sections):
 

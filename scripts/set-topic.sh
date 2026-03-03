@@ -4,7 +4,7 @@
 # If .compacted exists, LLM summary is discarded — cold-reads from JSONL instead (LLM context
 # is truncated after compact, its summary would be inaccurate).
 #
-# Usage: set-topic.sh <old_topic_slug> <new_topic_slug> <session_id> <old_topic_summary>
+# Usage: set-topic.sh <old_topic_slug> <new_topic_slug> <session_id> <old_topic_summary> [transcript_path]
 
 set -euo pipefail
 
@@ -12,6 +12,7 @@ OLD_SLUG="$1"
 NEW_SLUG="$2"
 SESSION_ID="$3"
 OLD_SUMMARY="$4"
+TRANSCRIPT_JSONL="${5:-}"  # optional: passed from stop.sh, overrides hardcoded JSONL path
 
 # Validate slug format (defense in depth — stop.sh already validates via regex)
 for slug in "$OLD_SLUG" "$NEW_SLUG"; do
@@ -34,7 +35,12 @@ END_TIME=$(date +"%Y-%m-%d %H:%M")
 # Resolve JSONL path and extract-topic.js for timestamp extraction
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 EXTRACT_SCRIPT="$PLUGIN_ROOT/scripts/extract-topic.js"
-JSONL_PATH="$HOME/.claude/projects/$PROJECT_ID/${SESSION_ID}.jsonl"
+# Use transcript_path from stop.sh if provided, otherwise fall back to hardcoded path
+if [ -n "$TRANSCRIPT_JSONL" ] && [ -f "$TRANSCRIPT_JSONL" ]; then
+  JSONL_PATH="$TRANSCRIPT_JSONL"
+else
+  JSONL_PATH="$HOME/.claude/projects/$PROJECT_ID/${SESSION_ID}.jsonl"
+fi
 
 mkdir -p "$SESSION_DIR"
 
@@ -90,8 +96,10 @@ if [ "$OLD_SLUG" != "none" ] && [ "$OLD_SUMMARY" != "none" ]; then
     SEQ=$(node "$EXTRACT_SCRIPT" "$JSONL_PATH" __all__ 2>/dev/null | grep -v '^__untagged__$' | grep -n "^${OLD_SLUG}$" | head -1 | cut -d: -f1) || true
   fi
   if [ -z "$SEQ" ]; then
-    echo "Error: cannot determine topic sequence — JSONL not found or slug '$OLD_SLUG' not in topic list" >&2
-    exit 1
+    # Fallback: count existing topic files and use next number
+    EXISTING=$(find "$SESSION_DIR" -maxdepth 1 -name '[0-9][0-9]-*.md' -not -name '.*' 2>/dev/null | wc -l | tr -d ' ')
+    SEQ=$((EXISTING + 1))
+    echo "[set-topic.sh] JSONL sequence unavailable, using fallback SEQ=$SEQ" >&2
   fi
   SEQ=$(printf "%02d" "$SEQ")
   OLD_FILE="$SESSION_DIR/${SEQ}-${OLD_SLUG}.md"

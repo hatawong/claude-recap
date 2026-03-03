@@ -92,8 +92,10 @@ if [ -f "$JSONL_PATH" ] && [ -f "$EXTRACT_SCRIPT" ]; then
   SEQ=$(node "$EXTRACT_SCRIPT" "$JSONL_PATH" __all__ 2>/dev/null | grep -v '^__untagged__$' | grep -n "^${SLUG}$" | head -1 | cut -d: -f1) || true
 fi
 if [ -z "$SEQ" ]; then
-  echo "Error: cannot determine topic sequence — JSONL not found or slug '$SLUG' not in topic list" >&2
-  exit 1
+  # Fallback: count existing topic files and use next number
+  EXISTING=$(find "$SESSION_DIR" -maxdepth 1 -name '[0-9][0-9]-*.md' -not -name '.*' 2>/dev/null | wc -l | tr -d ' ')
+  SEQ=$((EXISTING + 1))
+  echo "[save-topic.sh] JSONL sequence unavailable, using fallback SEQ=$SEQ" >&2
 fi
 SEQ=$(printf "%02d" "$SEQ")
 TARGET="$SESSION_DIR/${SEQ}-${SLUG}.md"
