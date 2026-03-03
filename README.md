@@ -5,6 +5,7 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/version-1.0.0-blue" alt="Version" />
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License" />
   <img src="https://img.shields.io/badge/shell-bash-green" alt="Shell" />
   <img src="https://img.shields.io/badge/Node.js-18+-339933" alt="Node.js" />
