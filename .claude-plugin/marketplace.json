@@ -1,0 +1,16 @@
+{
+  "name": "claude-recap-marketplace",
+  "owner": { "name": "Hata" },
+  "metadata": {
+    "description": "Topic-based automatic memory for Claude Code",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "claude-recap",
+      "description": "Topic-based automatic memory for Claude Code — never lose context across sessions or compactions.",
+      "version": "0.1.0",
+      "source": "./"
+    }
+  ]
+}
