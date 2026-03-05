@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.0.1] - 2026-03-05
+
+### Bug Fixes
+
+- **Fix cold-read hang on large transcripts** — `claude -p` hangs indefinitely when transcript (90KB+) is passed as command-line argument. Now uses stdin pipe instead. ([#cold-summarize])
+- **Fix cold-read fallback skipped by `set -e`** — When `claude -p` is killed by timeout, `wait` returns non-zero and `set -e` exits the script, skipping fallback logic. Now wrapped in `if/else`. ([#cold-summarize])
+- **Fix `Terminated: 15` leaking into summaries** — Incorrect redirect order (`2>/dev/null 2>&1`) sent kill messages to stdout. Fixed by removing `2>&1`. ([#cold-summarize])
+- **Fix user message misclassification in extract-topic** — User messages that initiate a topic switch were assigned to the previous topic. Now uses lookahead strategy: user messages are held until the next assistant message determines their topic. ([#extract-topic])
+
+### Improvements
+
+- **Skip LLM fallback after compaction** — When `.compacted` exists and cold-read fails, `save-topic.sh` now exits without writing instead of using a degraded LLM summary. `archive-pending` will retry later. ([#save-topic])
+- **Anti-pattern-copy prompt** — Added "Do NOT copy or build upon any previous summary" rule to `/save-topic` skill to prevent LLM from producing progressively degraded summaries. ([#SKILL.md])
+- **Reduce cold-read timeout** — Default `COLD_TIMEOUT` reduced from 300s to 120s. ([#cold-summarize])
+
+### Technical
+
+- 116 script-level tests passing
+- Added `COLD_TIMEOUT` env var to 4 test cases to prevent test hangs
+
 ## [1.0.0] - 2026-03-04
 
 ### Features
