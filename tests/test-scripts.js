@@ -1215,6 +1215,421 @@ console.log('Test: save-topic.sh edge cases');
 
 console.log('');
 
+// ─── Test: ignore-topic-utils.sh (glob matching) ────────────────────────────
+
+console.log('Test: ignore-topic-utils.sh');
+
+(function testIgnoreGlobMatchStar() {
+  // git-* should match git-rebase but not gitmoji
+  const tmpDir = createTempDir();
+  const memoryRoot = path.join(tmpDir, 'memory');
+  fs.mkdirSync(memoryRoot, { recursive: true });
+  fs.writeFileSync(path.join(memoryRoot, '.ignore'), 'git-*\n');
+
+  const script = `
+    source "${PLUGIN_DIR}/scripts/ignore-topic-utils.sh"
+    topic_is_ignored "git-rebase" "${memoryRoot}" "${memoryRoot}/nonexistent" && echo "IGNORED" || echo "NOT_IGNORED"
+  `;
+  const r1 = spawnSync('bash', ['-c', script], { encoding: 'utf-8' });
+  assert(r1.stdout.trim() === 'IGNORED', 'glob: git-* matches git-rebase');
+
+  const script2 = `
+    source "${PLUGIN_DIR}/scripts/ignore-topic-utils.sh"
+    topic_is_ignored "gitmoji" "${memoryRoot}" "${memoryRoot}/nonexistent" && echo "IGNORED" || echo "NOT_IGNORED"
+  `;
+  const r2 = spawnSync('bash', ['-c', script2], { encoding: 'utf-8' });
+  assert(r2.stdout.trim() === 'NOT_IGNORED', 'glob: git-* does not match gitmoji');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+(function testIgnoreExactMatch() {
+  const tmpDir = createTempDir();
+  const memoryRoot = path.join(tmpDir, 'memory');
+  fs.mkdirSync(memoryRoot, { recursive: true });
+  fs.writeFileSync(path.join(memoryRoot, '.ignore'), 'lint-fix\n');
+
+  const script = `
+    source "${PLUGIN_DIR}/scripts/ignore-topic-utils.sh"
+    topic_is_ignored "lint-fix" "${memoryRoot}" "${memoryRoot}/nonexistent" && echo "IGNORED" || echo "NOT_IGNORED"
+  `;
+  const r1 = spawnSync('bash', ['-c', script], { encoding: 'utf-8' });
+  assert(r1.stdout.trim() === 'IGNORED', 'exact: lint-fix matches');
+
+  const script2 = `
+    source "${PLUGIN_DIR}/scripts/ignore-topic-utils.sh"
+    topic_is_ignored "lint-fixing" "${memoryRoot}" "${memoryRoot}/nonexistent" && echo "IGNORED" || echo "NOT_IGNORED"
+  `;
+  const r2 = spawnSync('bash', ['-c', script2], { encoding: 'utf-8' });
+  assert(r2.stdout.trim() === 'NOT_IGNORED', 'exact: lint-fix does not match lint-fixing');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+(function testIgnoreProjectLevelOverride() {
+  // Global has no match, project-level has match → ignored
+  const tmpDir = createTempDir();
+  const memoryRoot = path.join(tmpDir, 'memory');
+  const projectDir = path.join(memoryRoot, 'projects', '-test');
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(path.join(memoryRoot, '.ignore'), '# only comments\n');
+  fs.writeFileSync(path.join(projectDir, '.ignore'), 'deploy-*\n');
+
+  const script = `
+    source "${PLUGIN_DIR}/scripts/ignore-topic-utils.sh"
+    topic_is_ignored "deploy-staging" "${memoryRoot}" "${projectDir}" && echo "IGNORED" || echo "NOT_IGNORED"
+  `;
+  const r1 = spawnSync('bash', ['-c', script], { encoding: 'utf-8' });
+  assert(r1.stdout.trim() === 'IGNORED', 'project-level: deploy-* matches deploy-staging');
+
+  const script2 = `
+    source "${PLUGIN_DIR}/scripts/ignore-topic-utils.sh"
+    topic_is_ignored "feature-design" "${memoryRoot}" "${projectDir}" && echo "IGNORED" || echo "NOT_IGNORED"
+  `;
+  const r2 = spawnSync('bash', ['-c', script2], { encoding: 'utf-8' });
+  assert(r2.stdout.trim() === 'NOT_IGNORED', 'project-level: feature-design not ignored');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+(function testIgnoreCommentsAndBlankLines() {
+  const tmpDir = createTempDir();
+  const memoryRoot = path.join(tmpDir, 'memory');
+  fs.mkdirSync(memoryRoot, { recursive: true });
+  fs.writeFileSync(path.join(memoryRoot, '.ignore'), '# comment\n\n  \nrun-tests\n# another comment\n');
+
+  const script = `
+    source "${PLUGIN_DIR}/scripts/ignore-topic-utils.sh"
+    topic_is_ignored "run-tests" "${memoryRoot}" "${memoryRoot}/nonexistent" && echo "IGNORED" || echo "NOT_IGNORED"
+  `;
+  const r1 = spawnSync('bash', ['-c', script], { encoding: 'utf-8' });
+  assert(r1.stdout.trim() === 'IGNORED', 'comments/blanks: run-tests still matched');
+
+  // "comment" should not be treated as a pattern
+  const script2 = `
+    source "${PLUGIN_DIR}/scripts/ignore-topic-utils.sh"
+    topic_is_ignored "comment" "${memoryRoot}" "${memoryRoot}/nonexistent" && echo "IGNORED" || echo "NOT_IGNORED"
+  `;
+  const r2 = spawnSync('bash', ['-c', script2], { encoding: 'utf-8' });
+  assert(r2.stdout.trim() === 'NOT_IGNORED', 'comments/blanks: comment lines not treated as patterns');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+(function testIgnoreNoFile() {
+  // No .ignore file → nothing ignored
+  const tmpDir = createTempDir();
+  const memoryRoot = path.join(tmpDir, 'memory');
+  fs.mkdirSync(memoryRoot, { recursive: true });
+
+  const script = `
+    source "${PLUGIN_DIR}/scripts/ignore-topic-utils.sh"
+    topic_is_ignored "anything" "${memoryRoot}" "${memoryRoot}/nonexistent" && echo "IGNORED" || echo "NOT_IGNORED"
+  `;
+  const r1 = spawnSync('bash', ['-c', script], { encoding: 'utf-8' });
+  assert(r1.stdout.trim() === 'NOT_IGNORED', 'no-file: nothing ignored when .ignore absent');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+console.log('');
+
+// ─── Test: ignore-topic.sh (add/remove/list) ────────────────────────────────
+
+console.log('Test: ignore-topic.sh');
+
+(function testIgnoreTopicAdd() {
+  const tmpDir = createTempDir();
+  const memoryRoot = path.join(tmpDir, 'memory');
+  fs.mkdirSync(memoryRoot, { recursive: true });
+
+  const result = spawnSync('bash', [
+    path.join(PLUGIN_DIR, 'scripts/ignore-topic.sh'),
+    'add', 'global', 'git-*', 'lint-fix',
+  ], {
+    encoding: 'utf-8',
+    env: { ...process.env, MEMORY_HOME: memoryRoot },
+  });
+
+  assert(result.status === 0, 'add: exits 0');
+  assert(result.stdout.includes('Added: git-*'), 'add: confirms git-*');
+  assert(result.stdout.includes('Added: lint-fix'), 'add: confirms lint-fix');
+
+  const content = fs.readFileSync(path.join(memoryRoot, '.ignore'), 'utf-8');
+  assert(content.includes('git-*'), 'add: file contains git-*');
+  assert(content.includes('lint-fix'), 'add: file contains lint-fix');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+(function testIgnoreTopicAddDuplicate() {
+  const tmpDir = createTempDir();
+  const memoryRoot = path.join(tmpDir, 'memory');
+  fs.mkdirSync(memoryRoot, { recursive: true });
+  fs.writeFileSync(path.join(memoryRoot, '.ignore'), 'git-*\n');
+
+  const result = spawnSync('bash', [
+    path.join(PLUGIN_DIR, 'scripts/ignore-topic.sh'),
+    'add', 'global', 'git-*',
+  ], {
+    encoding: 'utf-8',
+    env: { ...process.env, MEMORY_HOME: memoryRoot },
+  });
+
+  assert(result.status === 0, 'add-dup: exits 0');
+  assert(result.stdout.includes('Already exists'), 'add-dup: reports duplicate');
+
+  // Should not have duplicate lines
+  const content = fs.readFileSync(path.join(memoryRoot, '.ignore'), 'utf-8');
+  const matches = content.split('\n').filter(l => l === 'git-*');
+  assert(matches.length === 1, 'add-dup: no duplicate in file');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+(function testIgnoreTopicRemove() {
+  const tmpDir = createTempDir();
+  const memoryRoot = path.join(tmpDir, 'memory');
+  fs.mkdirSync(memoryRoot, { recursive: true });
+  fs.writeFileSync(path.join(memoryRoot, '.ignore'), 'git-*\nlint-fix\n');
+
+  const result = spawnSync('bash', [
+    path.join(PLUGIN_DIR, 'scripts/ignore-topic.sh'),
+    'remove', 'global', 'git-*',
+  ], {
+    encoding: 'utf-8',
+    env: { ...process.env, MEMORY_HOME: memoryRoot },
+  });
+
+  assert(result.status === 0, 'remove: exits 0');
+  assert(result.stdout.includes('Removed: git-*'), 'remove: confirms removal');
+
+  const content = fs.readFileSync(path.join(memoryRoot, '.ignore'), 'utf-8');
+  assert(!content.includes('git-*'), 'remove: git-* gone from file');
+  assert(content.includes('lint-fix'), 'remove: lint-fix preserved');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+(function testIgnoreTopicRemoveNotFound() {
+  const tmpDir = createTempDir();
+  const memoryRoot = path.join(tmpDir, 'memory');
+  fs.mkdirSync(memoryRoot, { recursive: true });
+  fs.writeFileSync(path.join(memoryRoot, '.ignore'), 'lint-fix\n');
+
+  const result = spawnSync('bash', [
+    path.join(PLUGIN_DIR, 'scripts/ignore-topic.sh'),
+    'remove', 'global', 'nonexistent',
+  ], {
+    encoding: 'utf-8',
+    env: { ...process.env, MEMORY_HOME: memoryRoot },
+  });
+
+  assert(result.status === 1, 'remove-notfound: exits 1');
+  assert(result.stdout.includes('Not found'), 'remove-notfound: reports not found');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+(function testIgnoreTopicListEmpty() {
+  const tmpDir = createTempDir();
+  const memoryRoot = path.join(tmpDir, 'memory');
+  fs.mkdirSync(memoryRoot, { recursive: true });
+
+  const result = spawnSync('bash', [
+    path.join(PLUGIN_DIR, 'scripts/ignore-topic.sh'),
+    'list',
+  ], {
+    encoding: 'utf-8',
+    env: { ...process.env, MEMORY_HOME: memoryRoot },
+  });
+
+  assert(result.status === 0, 'list-empty: exits 0');
+  assert(result.stdout.includes('No ignore rules'), 'list-empty: reports empty');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+console.log('');
+
+// ─── Test: stop.sh with .ignore ──────────────────────────────────────────────
+
+console.log('Test: stop.sh with .ignore');
+
+(function testStopHookIgnoredTopicSkipsArchival() {
+  // Old topic matches .ignore → exit 0 (skip archival), .current_topic updated
+  const tmpDir = createTempDir();
+  const memoryHome = path.join(tmpDir, 'memory');
+  const projectDir = path.join(memoryHome, 'projects', '-test-project');
+  const sessionDir = path.join(projectDir, 'test-session');
+
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, '.current_topic'), 'git-rebase');
+  fs.writeFileSync(path.join(memoryHome, '.ignore'), 'git-*\n');
+
+  const input = JSON.stringify({
+    cwd: '/test-project',
+    session_id: 'test-session',
+    stop_hook_active: false,
+    last_assistant_message: '› `feature-work`\n\nNow working on feature.'
+  });
+
+  const result = spawnSync('bash', [
+    path.join(PLUGIN_DIR, 'hooks/stop.sh'),
+  ], {
+    input,
+    encoding: 'utf-8',
+    env: { ...process.env, MEMORY_HOME: memoryHome },
+  });
+
+  assert(result.status === 0, 'ignored topic: exit 0 (no archival)');
+  assert(result.stderr.includes('.ignore'), 'ignored topic: stderr mentions .ignore');
+
+  const currentTopic = fs.readFileSync(path.join(sessionDir, '.current_topic'), 'utf-8').trim();
+  assert(currentTopic === 'feature-work', 'ignored topic: .current_topic updated to new topic');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+(function testStopHookNonIgnoredTopicTriggersArchival() {
+  // Old topic does NOT match .ignore → exit 2 (trigger archival)
+  const tmpDir = createTempDir();
+  const memoryHome = path.join(tmpDir, 'memory');
+  const projectDir = path.join(memoryHome, 'projects', '-test-project');
+  const sessionDir = path.join(projectDir, 'test-session');
+
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, '.current_topic'), 'feature-design');
+  fs.writeFileSync(path.join(memoryHome, '.ignore'), 'git-*\n');
+
+  const input = JSON.stringify({
+    cwd: '/test-project',
+    session_id: 'test-session',
+    stop_hook_active: false,
+    last_assistant_message: '› `api-refactor`\n\nRefactoring the API.'
+  });
+
+  const result = spawnSync('bash', [
+    path.join(PLUGIN_DIR, 'hooks/stop.sh'),
+  ], {
+    input,
+    encoding: 'utf-8',
+    env: { ...process.env, MEMORY_HOME: memoryHome },
+  });
+
+  assert(result.status === 2, 'non-ignored topic: exit 2 (trigger archival)');
+  assert(result.stderr.includes('set-topic.sh'), 'non-ignored topic: stderr contains archival command');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+(function testStopHookNoIgnoreFileTriggersArchival() {
+  // No .ignore file → exit 2 (normal archival)
+  const tmpDir = createTempDir();
+  const memoryHome = path.join(tmpDir, 'memory');
+  const sessionDir = path.join(memoryHome, 'projects', '-test-project', 'test-session');
+
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, '.current_topic'), 'old-topic');
+
+  const input = JSON.stringify({
+    cwd: '/test-project',
+    session_id: 'test-session',
+    stop_hook_active: false,
+    last_assistant_message: '› `new-topic`\n\nNew topic here.'
+  });
+
+  const result = spawnSync('bash', [
+    path.join(PLUGIN_DIR, 'hooks/stop.sh'),
+  ], {
+    input,
+    encoding: 'utf-8',
+    env: { ...process.env, MEMORY_HOME: memoryHome },
+  });
+
+  assert(result.status === 2, 'no .ignore: exit 2 (normal archival)');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+console.log('');
+
+// ─── Test: archive-pending.sh with .ignore ───────────────────────────────────
+
+console.log('Test: archive-pending.sh with .ignore');
+
+(function testArchivePendingSkipsIgnoredTopics() {
+  const tmpDir = createTempDir();
+  const memoryRoot = path.join(tmpDir, 'memory');
+  const projectDir = path.join(memoryRoot, 'projects', '-test-project');
+  const session1 = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const session1Dir = path.join(projectDir, session1);
+
+  fs.mkdirSync(session1Dir, { recursive: true });
+  fs.writeFileSync(path.join(session1Dir, '.current_topic'), 'greeting');
+
+  // Create .ignore that matches "greeting"
+  fs.writeFileSync(path.join(memoryRoot, '.ignore'), 'greeting\n');
+
+  // Create JSONL with greeting topic
+  const claudeProjectDir = path.join(tmpDir, '.claude', 'projects', '-test-project');
+  fs.mkdirSync(claudeProjectDir, { recursive: true });
+  createFixtureJSONLWithSlug(path.join(claudeProjectDir, `${session1}.jsonl`), 'greeting');
+
+  const result = spawnSync('bash', [
+    path.join(PLUGIN_DIR, 'scripts/archive-pending.sh'),
+    projectDir,
+    'current-session-id',
+    PLUGIN_DIR,
+    '--dry-run',
+  ], {
+    encoding: 'utf-8',
+    env: { ...process.env, HOME: tmpDir, MEMORY_HOME: memoryRoot },
+  });
+
+  assert(result.status === 0, 'ignore in archive-pending: exits 0');
+  assert(!result.stdout.includes('PENDING'), 'ignore in archive-pending: greeting not marked as pending');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+(function testArchivePendingArchivesNonIgnoredTopics() {
+  const tmpDir = createTempDir();
+  const memoryRoot = path.join(tmpDir, 'memory');
+  const projectDir = path.join(memoryRoot, 'projects', '-test-project');
+  const session1 = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const session1Dir = path.join(projectDir, session1);
+
+  fs.mkdirSync(session1Dir, { recursive: true });
+  fs.writeFileSync(path.join(session1Dir, '.current_topic'), 'feature-work');
+
+  // Create .ignore that only matches git-*
+  fs.writeFileSync(path.join(memoryRoot, '.ignore'), 'git-*\n');
+
+  // Create JSONL with feature-work topic (not ignored)
+  const claudeProjectDir = path.join(tmpDir, '.claude', 'projects', '-test-project');
+  fs.mkdirSync(claudeProjectDir, { recursive: true });
+  createFixtureJSONLWithSlug(path.join(claudeProjectDir, `${session1}.jsonl`), 'feature-work');
+
+  const result = spawnSync('bash', [
+    path.join(PLUGIN_DIR, 'scripts/archive-pending.sh'),
+    projectDir,
+    'current-session-id',
+    PLUGIN_DIR,
+    '--dry-run',
+  ], {
+    encoding: 'utf-8',
+    env: { ...process.env, HOME: tmpDir, MEMORY_HOME: memoryRoot },
+  });
+
+  assert(result.status === 0, 'non-ignored in archive-pending: exits 0');
+  assert(result.stdout.includes('PENDING'), 'non-ignored in archive-pending: feature-work marked as pending');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+})();
+
+console.log('');
+
 // ─── Summary ─────────────────────────────────────────────────────────────────
 
 console.log(`\n${passed} passed, ${failed} failed`);

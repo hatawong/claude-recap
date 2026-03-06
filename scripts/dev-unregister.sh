@@ -38,13 +38,18 @@ else
   echo "Removed hooks from $SETTINGS_FILE (other settings preserved)"
 fi
 
-# Remove skill symlinks if they exist
+# Remove skill symlinks that point to this repo
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SKILLS_DIR="$PROJECT_DIR/.claude/skills"
 if [ -d "$SKILLS_DIR" ]; then
   REMOVED=0
-  for skill in remember save-topic list-topics; do
-    if [ -L "$SKILLS_DIR/$skill" ]; then
-      rm "$SKILLS_DIR/$skill"
+  for target in "$SKILLS_DIR"/*; do
+    [ ! -L "$target" ] && continue
+    # Only remove symlinks pointing into our repo
+    link_dest=$(readlink "$target" 2>/dev/null || true)
+    if [[ "$link_dest" == "$REPO_ROOT/"* ]]; then
+      rm "$target"
+      echo "  Removed skill: $(basename "$target")"
       REMOVED=$((REMOVED + 1))
     fi
   done

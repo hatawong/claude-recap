@@ -64,9 +64,18 @@ fi
 echo "Registered hooks in $SETTINGS_FILE"
 echo "  SessionStart → $REPO_ROOT/hooks/session-start.sh"
 echo "  Stop         → $REPO_ROOT/hooks/stop.sh"
-echo ""
-echo "To also register skills, create symlinks:"
-echo "  mkdir -p $SETTINGS_DIR/skills"
-echo "  ln -sf $REPO_ROOT/skills/remember $SETTINGS_DIR/skills/remember"
-echo "  ln -sf $REPO_ROOT/skills/save-topic $SETTINGS_DIR/skills/save-topic"
-echo "  ln -sf $REPO_ROOT/skills/list-topics $SETTINGS_DIR/skills/list-topics"
+
+# Auto-symlink all skills from the repo
+SKILLS_DIR="$SETTINGS_DIR/skills"
+mkdir -p "$SKILLS_DIR"
+for skill_dir in "$REPO_ROOT"/skills/*/; do
+  [ ! -d "$skill_dir" ] && continue
+  skill_name=$(basename "$skill_dir")
+  target="$SKILLS_DIR/$skill_name"
+  if [ -L "$target" ] || [ -d "$target" ]; then
+    echo "  Skill: $skill_name (already exists, skipped)"
+  else
+    ln -sf "$skill_dir" "$target"
+    echo "  Skill: $skill_name → $skill_dir"
+  fi
+done

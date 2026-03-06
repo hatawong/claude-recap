@@ -18,6 +18,10 @@ if [ "${4:-}" = "--dry-run" ]; then
 fi
 
 EXTRACT_SCRIPT="$PLUGIN_ROOT/scripts/extract-topic.js"
+MEMORY_ROOT=$(cd "$PROJECT_DIR/../.." && pwd)
+
+# Load .ignore matching
+source "$PLUGIN_ROOT/scripts/ignore-topic-utils.sh"
 
 # Max topics to archive per run (across all sessions)
 MAX_PENDING=3
@@ -72,6 +76,11 @@ for session_dir in $(find "$PROJECT_DIR" -mindepth 1 -maxdepth 1 -type d -print0
   while IFS= read -r slug; do
     topic_seq=$((topic_seq + 1))
     [ -z "$slug" ] && continue
+
+    # Check .ignore — skip ignored topics (before cold-read summarization)
+    if topic_is_ignored "$slug" "$MEMORY_ROOT" "$PROJECT_DIR"; then
+      continue
+    fi
 
     seq=$(printf "%02d" "$topic_seq")
     target_file="$session_dir/${seq}-${slug}.md"

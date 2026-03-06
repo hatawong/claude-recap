@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.2] - 2026-03-06
+
+### Features
+
+- **Topic ignore list** — Skip archival for routine/mechanical topics (e.g., `git-*`, `lint-fix`, `run-tests`) using `.ignore` files with `.gitignore`-style glob patterns. Supports both global (`~/.memory/.ignore`) and per-project (`~/.memory/projects/{id}/.ignore`) configuration. ([#1](https://github.com/hatawong/claude-recap/issues/1))
+- **`/ignore-topic` skill** — Add, remove, and list ignore patterns interactively via `/ignore-topic` command.
+
+### Technical
+
+- Pre-summary interception in both `stop.sh` (eyewitness path) and `archive-pending.sh` (cold-reader path) — ignored topics are skipped before any LLM call, saving cost and latency.
+- `dev-register.sh` now auto-discovers and symlinks all skills dynamically.
+- 151 script-level tests passing (52 new assertions for ignore functionality).
+
 ## [1.0.1] - 2026-03-05
 
 ### Bug Fixes

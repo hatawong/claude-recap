@@ -69,8 +69,17 @@ if [ "$OLD_TOPIC" = "none" ]; then
   exit 0
 fi
 
-# Topic changed — archive old topic via direct bash command
+# Check .ignore — skip archival for ignored topics (before LLM summary)
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+PROJECT_DIR="$MEMORY_ROOT/projects/$PROJECT_ID"
+source "$PLUGIN_ROOT/scripts/ignore-topic-utils.sh"
+if topic_is_ignored "$OLD_TOPIC" "$MEMORY_ROOT" "$PROJECT_DIR"; then
+  echo "[stop.sh] topic '$OLD_TOPIC' matches .ignore, skipping archival" >&2
+  echo "$NEW_TOPIC" > "$TOPIC_FILE"
+  exit 0
+fi
+
+# Topic changed — archive old topic via direct bash command
 # Resolve transcript_path (may already be set from fallback above, or extract now)
 TRANSCRIPT_PATH="${TRANSCRIPT_PATH:-$(echo "$INPUT" | jq -r '.transcript_path // ""')}"
 
